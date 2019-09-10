@@ -2,6 +2,12 @@
 ruby marshal and unmarshal by golang
 
 
+# note
+
+- only for little endian
+- only for 64 bit big int
+
+
 # Useful links
 
 - https://github.com/dozen/ruby-marshal/
