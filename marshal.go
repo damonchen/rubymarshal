@@ -119,8 +119,8 @@ func (d *Decoder) parseBignum() int64 {
 	b, _ := d.r.ReadByte()
 	isNegative := b == '-'
 
-	len := d.parseInt()
-	buff := make([]byte, len*2)
+	length := d.parseInt()
+	buff := make([]byte, length*2)
 	_, _ = d.r.Read(buff)
 
 	result := int64(0)
@@ -152,9 +152,9 @@ func (d *Decoder) parseObjectLink() interface{} {
 }
 
 func (d *Decoder) parseString() string {
-	len := d.parseInt()
-	str := make([]byte, len)
-	d.r.Read(str)
+	length := d.parseInt()
+	str := make([]byte, length)
+	_, _ = d.r.Read(str)
 	return string(str)
 }
 
@@ -310,6 +310,10 @@ func (e *Encoder) marshal(v interface{}) error {
 		typ = typ.Elem()
 	}
 
+	return e._marshalVal(val, typ)
+}
+
+func (e *Encoder) _marshalVal(val reflect.Value, typ reflect.Type) error{
 	switch typ.Kind() {
 	case reflect.Bool:
 		return e.encBool(val.Bool())
@@ -317,11 +321,16 @@ func (e *Encoder) marshal(v interface{}) error {
 		_ = e.w.WriteByte(FIXNUM_SIGN)
 		return e.encInt(int(val.Int()))
 	case reflect.Int64:
+		_ = e.w.WriteByte(BIGNUM_SIGN)
 		return e.encBigInt(val.Int())
 	case reflect.String:
 		return e.encString(val.String())
 	case reflect.Struct:
 		return e.encStruct(val, typ)
+	case reflect.Array:
+		fallthrough
+	case reflect.Slice:
+		return e.encArray(val)
 	}
 	return nil
 }
@@ -367,40 +376,44 @@ func (e *Encoder) encStruct(value reflect.Value, typ reflect.Type) error {
 			fieldType = fieldType.Elem()
 		}
 
-		switch fieldType.Kind() {
-		case reflect.Bool:
-			err = e.encBool(val.Bool())
-			if err != nil {
-				return err
-			}
-		case reflect.Int:
-			err = e.w.WriteByte(FIXNUM_SIGN)
-			if err != nil {
-				return err
-			}
-			err = e.encInt(int(val.Int()))
-			if err != nil {
-				return err
-			}
-		case reflect.Int64:
-			err = e.w.WriteByte(BIGNUM_SIGN)
-			if err != nil {
-				return err
-			}
-			err = e.encBigInt(val.Int())
-			if err != nil {
-				return err
-			}
-		case reflect.String:
-			err = e.encString(val.String())
-			if err != nil {
-				return err
-			}
-		case reflect.Struct:
-			err = e.encStruct(val, fieldType)
-			if err != nil {
-				return err
-			}
+		err := e._marshalVal(val, fieldType)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+
+func (e *Encoder) encArray(val reflect.Value) error {
+	err := e.w.WriteByte(ARRAY_SIGN)
+	if err != nil {
+		return err
+	}
+
+	// 获取数组或者slice的长度
+	length := val.Len()
+
+	err = e.encInt(length)
+	if err != nil {
+		return err
+	}
+
+	for i:=0; i<length; i++ {
+		elem := val.Index(i)
+		elemTyp := elem.Type()
+
+		vKind := elemTyp.Kind()
+
+		if vKind == reflect.Ptr {
+			elem = elem.Elem()
+			elemTyp = elemTyp.Elem()
+		}
+
+		err := e._marshalVal(elem, elemTyp)
+		if err != nil {
+			return err
 		}
 	}
 
