@@ -6,6 +6,8 @@ import (
 	"errors"
 	"io"
 	"math"
+	"strings"
+	"fmt"
 
 	//"math/big"
 	"reflect"
@@ -261,11 +263,47 @@ func MapToStruct(mi interface{}, o interface{}) {
 			} else {
 				MapToStruct(mm, fieldObj.Addr().Interface())
 			}
+		} else if ma, ok := val.([]interface{}); ok  {
+			fieldObj := oValue.Field(i)
+			if len(ma) == 0 {
+				newObj := reflect.New(fieldObj.Type().Elem())
+				fieldObj.Set(newObj)
+				oValue.Field(i).Set(newObj)
+			} else {
+				MapToArray(ma, fieldObj)
+			}
 		} else {
 			oValue.Field(i).Set(reflect.ValueOf(val))
 		}
 	}
+}
 
+func MapToArray(ma []interface{}, fieldObj reflect.Value) {
+	//fieldObj = reflect.Indirect(fieldObj)
+	//fieldType := fieldObj.Type()
+
+
+	//
+	////mVal := reflect.Indirect(reflect.New(fieldType.Elem())).Addr()
+	//
+	////var values []reflect.Value
+	//for _, elem := range ma {
+	//	eType := reflect.TypeOf(elem)
+	//	eValue := reflect.Indirect(reflect.New(fieldType.Elem()).Elem()).Addr()
+	//
+	//	switch eType.Kind() {
+	//	case reflect.Bool:
+	//		eValue.SetBool(elem.(bool))
+	//	case reflect.Int:
+	//	case reflect.Float64:
+	//	case reflect.Struct:
+	//		MapToStruct(elem.(map[string]interface{}), eValue.Addr().Interface())
+	//	case reflect.String:
+	//		eValue.SetString(elem.(string))
+	//	}
+	//
+	//	fieldObj = reflect.Append(fieldObj, eValue)
+	//}
 }
 
 type Encoder struct {
@@ -327,6 +365,8 @@ func (e *Encoder) _marshalVal(val reflect.Value, typ reflect.Type) error{
 		return e.encString(val.String())
 	case reflect.Struct:
 		return e.encStruct(val, typ)
+	case reflect.Map:
+		return e.encMap(val.MapRange())
 	case reflect.Array:
 		fallthrough
 	case reflect.Slice:
@@ -357,14 +397,28 @@ func (e *Encoder) encStruct(value reflect.Value, typ reflect.Type) error {
 
 	for i := 0; i < value.NumField(); i++ {
 		field := typ.Field(i)
-		tagName := field.Tag.Get("ruby")
-		if  tagName == ""{
+		rubyTag := field.Tag.Get("ruby")
+		if  rubyTag == ""{
 			continue
 		}
 
-		err = e._encSymbol(tagName)
-		if err != nil {
-			return err
+		tags := strings.Split(rubyTag, ";")
+		tagName := tags[0]
+		if len(tags) > 1 {
+			keyInfo := tags[1]
+			if "key:string" == keyInfo {
+				err = e.encString(tagName)
+				if err != nil {
+					return err
+				}
+			} else {
+				return errors.New(fmt.Sprintf("unknown tag key %s", keyInfo))
+			}
+		} else {
+			err = e._encSymbol(tagName)
+			if err != nil {
+				return err
+			}
 		}
 
 		// 获取field的值，然后将值编码进去
@@ -418,6 +472,17 @@ func (e *Encoder) encArray(val reflect.Value) error {
 	}
 
 	return nil
+}
+
+func (e *Encoder) encMap(mi *reflect.MapIter) error {
+	//
+	//for mi.Next() {
+	//	key := mi.Key()
+	//	value := mi.Value()
+	//	fmt.Println(key, value)
+	//}
+	return nil
+
 }
 
 func (e *Encoder) encBool(val bool) error {

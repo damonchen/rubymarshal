@@ -3,6 +3,7 @@ package rbmarshal_test
 import (
 	"bytes"
 	"encoding/hex"
+	"fmt"
 	rbmarshal "github.com/damonchen/rubymarshal"
 	"testing"
 )
@@ -15,9 +16,11 @@ type User struct {
 
 // Profile profile
 type Profile struct {
-	User User   `ruby:"user"`
-	Job  string `ruby:"job"`
-	Time int64  `ruby:"time"`
+	User   User     `ruby:"user"`
+	Job    string   `ruby:"job"`
+	Time   int64    `ruby:"time"`
+	Names  []string `ruby:"names"`
+	Filter string   `ruby:"filter;key:string"`
 }
 
 func TestProfileMarshal(t *testing.T) {
@@ -39,6 +42,7 @@ func TestProfileMarshal(t *testing.T) {
 	expected := "04087b083a09757365727b073a096e616d6549220a64616d6f6e063a0645543a0861676569173a086a6f6249220f70726f6772616d6d6572063b07543a0974696d656c2b07985e775d"
 	s := hex.EncodeToString(buff.Bytes())
 	if expected != s {
+		fmt.Println(s)
 		t.Error("expected not value")
 	}
 }
@@ -70,3 +74,20 @@ func TestProfileArray(t *testing.T) {
 	}
 }
 
+func TestUnmarshal(t *testing.T) {
+	value := "04087b083a09757365727b073a096e616d6549220a64616d6f6e063a0645543a0861676569173a086a6f6249220c70726f6772616d063b07543a0a6e616d65735b0749220631063b075449220632063b0754"
+	bin, err := hex.DecodeString(value)
+	if err != nil {
+		t.Error(err)
+	}
+
+	v := Profile{}
+	buff := bytes.NewBuffer(bin)
+	err = rbmarshal.NewDecoder(buff).Decode(&v)
+	if err != nil {
+		t.Error(err)
+	}
+
+	fmt.Printf("%#v", v)
+
+}
