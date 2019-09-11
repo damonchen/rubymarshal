@@ -125,7 +125,7 @@ func (d *Decoder) parseBignum() int64 {
 
 	result := int64(0)
 	for i, d := range buff {
-		result |= int64(d) << (i * 8)
+		result |= int64(d) << (uint(i) * 8)
 	}
 
 	if isNegative {
