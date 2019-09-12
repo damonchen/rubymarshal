@@ -155,9 +155,18 @@ func (d *Decoder) parseObjectLink() interface{} {
 
 func (d *Decoder) parseString() string {
 	length := d.parseInt()
+
+	var result []byte
+
 	str := make([]byte, length)
-	_, _ = d.r.Read(str)
-	return string(str)
+	readed := 0
+	for readed<length {
+		n, _ := d.r.Read(str)
+		result = append(result, str[:n]...)
+		readed += n
+	}
+
+	return string(result)
 }
 
 type iVar struct {
