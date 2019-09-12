@@ -6,11 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"math"
 	"strings"
 
 	//"math/big"
 	"reflect"
+
+	"golang.org/x/text/encoding/simplifiedchinese"
+	"golang.org/x/text/transform"
 )
 
 const (
@@ -64,7 +68,7 @@ func (d *Decoder) unmarshal() interface{} {
 	case SYMBOL_LINK_SIGN: // ; - symbol symlink
 		return d.parseSymLink()
 	case OBJECT_LINK_SIGN: // @ - object link
-		panic("not supported.")
+		return d.parseObjectLink()
 	case IVAR_SIGN: // I - IVAR (encoded string or regexp)
 		return d.parseIvar()
 	case ARRAY_SIGN: // [ - array
@@ -150,6 +154,9 @@ func (d *Decoder) parseSymLink() string {
 
 func (d *Decoder) parseObjectLink() interface{} {
 	index := d.parseInt()
+	if index >= len(d.objects) {
+		return nil
+	}
 	return d.objects[index]
 }
 
@@ -171,21 +178,51 @@ func (d *Decoder) parseString() string {
 
 type iVar struct {
 	str string
+	key string
+	value interface{}
+}
+
+func gbk2utf8(s []byte) ([]byte, error) {
+	reader := transform.NewReader(bytes.NewReader(s), simplifiedchinese.GBK.NewDecoder())
+	return ioutil.ReadAll(reader)
+}
+
+func utf82gbk(s []byte) ([]byte, error) {
+	reader := transform.NewReader(bytes.NewReader(s), simplifiedchinese.GBK.NewEncoder())
+	return ioutil.ReadAll(reader)
 }
 
 func (d *Decoder) parseIvar() string {
 	str := d.unmarshal()
 
-	symbolCharLen := d.parseInt()
+	ivar := iVar{}
 
+	symbolCharLen := d.parseInt()
 	if symbolCharLen == 1 {
-		symbol := d.unmarshal().(string) // :E
-		_ = d.unmarshal()                // T
-		d.symbols = append(d.symbols, symbol)
+		// 第一个值key，第二个value，目前未用上
+		key := d.unmarshal().(string) // :E
+		value := d.unmarshal()                // T
+		d.objects = append(d.objects, value)
+
+		ivar.key = key
+		ivar.value = value
 	}
 
 	strString := str.(string)
-	ivar := iVar{strString}
+
+	// 需要准确编码处理
+ 	if ivar.key == "encoding" && ivar.value != nil {
+ 		encoding := ivar.value.(string)
+		if (strings.ToLower(encoding) == "gbk") {
+			decodeStr, err := gbk2utf8([]byte(strString))
+			if err != nil {
+				return ""
+			}
+			strString  = string(decodeStr)
+		}
+	}
+	ivar.str = strString
+
 	d.objects = append(d.objects, ivar)
 	return strString
 }
