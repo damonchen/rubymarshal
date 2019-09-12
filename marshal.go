@@ -158,10 +158,10 @@ func (d *Decoder) parseString() string {
 
 	var result []byte
 
-	str := make([]byte, length)
 	readed := 0
 	for readed<length {
-		n, _ := d.r.Read(str)
+		str := make([]byte, length-readed)
+		n, _ := d.r.Read(str[:])
 		result = append(result, str[:n]...)
 		readed += n
 	}
