@@ -4,10 +4,10 @@ import (
 	"bufio"
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"strings"
-	"fmt"
 
 	//"math/big"
 	"reflect"
@@ -232,79 +232,11 @@ func (d *Decoder) Decode(v interface{}) error {
 		return nil
 	}
 
-	if val.Elem().Kind() == reflect.Struct {
-		MapToStruct(r, v)
-	} else {
-		val.Elem().Set(reflect.ValueOf(r))
-	}
+	decode(r, reflect.ValueOf(v))
 
 	return nil
 }
 
-func MapToStruct(mi interface{}, o interface{}) {
-	oValue := reflect.ValueOf(o).Elem()
-	oType := reflect.TypeOf(o).Elem()
-	m := mi.(map[string]interface{})
-
-	for i := 0; i < oValue.NumField(); i++ {
-		field := oType.Field(i)
-		val := m[field.Tag.Get("ruby")]
-		if val == nil {
-			continue
-		}
-
-		if mm, ok := val.(map[string]interface{}); ok {
-			if fieldObj := oValue.Field(i); fieldObj.Kind() == reflect.Ptr {
-				if fieldObj.IsNil() {
-					newObj := reflect.New(fieldObj.Type().Elem())
-					fieldObj.Set(newObj)
-				}
-				MapToStruct(mm, fieldObj.Interface())
-			} else {
-				MapToStruct(mm, fieldObj.Addr().Interface())
-			}
-		} else if ma, ok := val.([]interface{}); ok  {
-			fieldObj := oValue.Field(i)
-			if len(ma) == 0 {
-				newObj := reflect.New(fieldObj.Type().Elem())
-				fieldObj.Set(newObj)
-				oValue.Field(i).Set(newObj)
-			} else {
-				MapToArray(ma, fieldObj)
-			}
-		} else {
-			oValue.Field(i).Set(reflect.ValueOf(val))
-		}
-	}
-}
-
-func MapToArray(ma []interface{}, fieldObj reflect.Value) {
-	//fieldObj = reflect.Indirect(fieldObj)
-	//fieldType := fieldObj.Type()
-
-
-	//
-	////mVal := reflect.Indirect(reflect.New(fieldType.Elem())).Addr()
-	//
-	////var values []reflect.Value
-	//for _, elem := range ma {
-	//	eType := reflect.TypeOf(elem)
-	//	eValue := reflect.Indirect(reflect.New(fieldType.Elem()).Elem()).Addr()
-	//
-	//	switch eType.Kind() {
-	//	case reflect.Bool:
-	//		eValue.SetBool(elem.(bool))
-	//	case reflect.Int:
-	//	case reflect.Float64:
-	//	case reflect.Struct:
-	//		MapToStruct(elem.(map[string]interface{}), eValue.Addr().Interface())
-	//	case reflect.String:
-	//		eValue.SetString(elem.(string))
-	//	}
-	//
-	//	fieldObj = reflect.Append(fieldObj, eValue)
-	//}
-}
 
 type Encoder struct {
 	w            *bufio.Writer
@@ -351,7 +283,7 @@ func (e *Encoder) marshal(v interface{}) error {
 	return e._marshalVal(val, typ)
 }
 
-func (e *Encoder) _marshalVal(val reflect.Value, typ reflect.Type) error{
+func (e *Encoder) _marshalVal(val reflect.Value, typ reflect.Type) error {
 	switch typ.Kind() {
 	case reflect.Bool:
 		return e.encBool(val.Bool())
@@ -365,8 +297,6 @@ func (e *Encoder) _marshalVal(val reflect.Value, typ reflect.Type) error{
 		return e.encString(val.String())
 	case reflect.Struct:
 		return e.encStruct(val, typ)
-	case reflect.Map:
-		return e.encMap(val.MapRange())
 	case reflect.Array:
 		fallthrough
 	case reflect.Slice:
@@ -375,13 +305,37 @@ func (e *Encoder) _marshalVal(val reflect.Value, typ reflect.Type) error{
 	return nil
 }
 
+type TagInfo struct {
+	name    string
+	keyType string
+}
+
+func parseTag(tag string) (TagInfo, error) {
+	tagInfo := TagInfo{}
+	tags := strings.Split(tag, ";")
+	tagInfo.name = tags[0]
+
+	for _, t := range tags[1:] {
+		split := strings.Split(t, ":")
+		if len(split) != 2 {
+			return tagInfo, errors.New("not valid struct tag")
+		}
+
+		if split[0] == "key" {
+			tagInfo.keyType = split[1]
+		}
+	}
+
+	return tagInfo, nil
+}
+
 func (e *Encoder) encStruct(value reflect.Value, typ reflect.Type) error {
 	// 计算总共有几个是标记了ruby的
 	rubyTag := 0
 	for i := 0; i < value.NumField(); i++ {
 		field := typ.Field(i)
 		tagName := field.Tag.Get("ruby")
-		if tagName != ""{
+		if tagName != "" {
 			rubyTag += 1
 		}
 	}
@@ -398,27 +352,27 @@ func (e *Encoder) encStruct(value reflect.Value, typ reflect.Type) error {
 	for i := 0; i < value.NumField(); i++ {
 		field := typ.Field(i)
 		rubyTag := field.Tag.Get("ruby")
-		if  rubyTag == ""{
+		if rubyTag == "" {
 			continue
 		}
 
-		tags := strings.Split(rubyTag, ";")
-		tagName := tags[0]
-		if len(tags) > 1 {
-			keyInfo := tags[1]
-			if "key:string" == keyInfo {
-				err = e.encString(tagName)
-				if err != nil {
-					return err
-				}
-			} else {
-				return errors.New(fmt.Sprintf("unknown tag key %s", keyInfo))
-			}
-		} else {
-			err = e._encSymbol(tagName)
+		info, err := parseTag(rubyTag)
+		if err != nil {
+			return err
+		}
+
+		if info.keyType == "symbol" || len(info.keyType) == 0 {
+			err = e._encSymbol(info.name)
 			if err != nil {
 				return err
 			}
+		} else if info.keyType == "string"{
+			err = e.encString(info.name)
+			if err != nil {
+				return err
+			}
+		} else {
+			return errors.New(fmt.Sprintf("unknown tag key %s", info.keyType))
 		}
 
 		// 获取field的值，然后将值编码进去
@@ -430,7 +384,7 @@ func (e *Encoder) encStruct(value reflect.Value, typ reflect.Type) error {
 			fieldType = fieldType.Elem()
 		}
 
-		err := e._marshalVal(val, fieldType)
+		err = e._marshalVal(val, fieldType)
 		if err != nil {
 			return err
 		}
@@ -438,7 +392,6 @@ func (e *Encoder) encStruct(value reflect.Value, typ reflect.Type) error {
 
 	return nil
 }
-
 
 func (e *Encoder) encArray(val reflect.Value) error {
 	err := e.w.WriteByte(ARRAY_SIGN)
@@ -454,7 +407,7 @@ func (e *Encoder) encArray(val reflect.Value) error {
 		return err
 	}
 
-	for i:=0; i<length; i++ {
+	for i := 0; i < length; i++ {
 		elem := val.Index(i)
 		elemTyp := elem.Type()
 
@@ -472,17 +425,6 @@ func (e *Encoder) encArray(val reflect.Value) error {
 	}
 
 	return nil
-}
-
-func (e *Encoder) encMap(mi *reflect.MapIter) error {
-	//
-	//for mi.Next() {
-	//	key := mi.Key()
-	//	value := mi.Value()
-	//	fmt.Println(key, value)
-	//}
-	return nil
-
 }
 
 func (e *Encoder) encBool(val bool) error {
@@ -539,14 +481,14 @@ func (e *Encoder) encInt(i int) error {
 
 /**
 这是一个半成品，只能针对int64做解码（可以满足一部分需求）)
- */
-func (e *Encoder) encBigInt(v int64 ) error {
+*/
+func (e *Encoder) encBigInt(v int64) error {
 	buff := bytes.NewBuffer(nil)
 	// 写入符号
-	if v >= 0  {
+	if v >= 0 {
 		_ = e.w.WriteByte('+')
 	} else {
-		_= e.w.WriteByte('-')
+		_ = e.w.WriteByte('-')
 	}
 
 	// 计算字节数
@@ -557,9 +499,9 @@ func (e *Encoder) encBigInt(v int64 ) error {
 		d = -d
 	}
 
-	for  {
-		sz ++
-		d >>=8
+	for {
+		sz++
+		d >>= 8
 		if d == 0 {
 			break;
 		}
@@ -577,10 +519,10 @@ func (e *Encoder) encBigInt(v int64 ) error {
 	}
 
 	w := 0
-	for i:=0; i<64; i+=8 {
+	for i := 0; i < 64; i += 8 {
 		buff.WriteByte(byte(d & 0xff))
 		w++
-		d >>=8
+		d >>= 8
 		if d == 0 {
 			break;
 		}
